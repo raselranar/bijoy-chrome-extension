@@ -3,6 +3,7 @@ class BijoyIME {
     this.layout = layout;
     this.active = false;
     this.gPending = false;
+    this.pendingVowel = null;
   }
 
   toggle() {
@@ -12,7 +13,7 @@ class BijoyIME {
 
   activate() { this.active = true; }
   deactivate() { this.active = false; }
-  reset() { this.gPending = false; }
+  reset() { this.gPending = false; this.pendingVowel = null; }
 
   handleKeyDown(event) {
     if (!this.active) return false;
@@ -23,13 +24,24 @@ class BijoyIME {
 
     if (key === 'Backspace') {
       event.preventDefault();
+      if (this.pendingVowel) {
+        this.pendingVowel = null;
+        return true;
+      }
       this.handleBackspace();
       return true;
     }
 
-    if (key === 'Enter' || key === 'Tab') return false;
+    if (key === 'Enter' || key === 'Tab') {
+      this.flushPending();
+      return false;
+    }
+
     if (key === 'Escape') return true;
-    if (key.length !== 1) return false;
+    if (key.length !== 1) {
+      this.flushPending();
+      return false;
+    }
 
     const el = document.activeElement;
     if (!el || !this.isEditable(el)) return false;
@@ -43,20 +55,21 @@ class BijoyIME {
 
     if (key === 'g') {
       event.preventDefault();
+      this.flushPending();
       this.gPending = true;
       return true;
     }
 
     const mapped = this.layout.map[key];
-    if (!mapped) return false;
+    if (!mapped) {
+      this.flushPending();
+      return false;
+    }
 
     event.preventDefault();
 
-    if (key === 'x') {
-      return this.handleXKey(mapped, el);
-    }
-
     if (this.isVowelSign(key)) {
+      this.flushPending();
       const prevChar = this.getCharBeforeCursor(el);
       if (prevChar === '\u0985') {
         const independent = this.layout.independentVowelMap[mapped];
@@ -65,10 +78,41 @@ class BijoyIME {
           return true;
         }
       }
+      this.pendingVowel = mapped;
+      return true;
+    }
+
+    if (this.pendingVowel) {
+      if (mapped === '\u0985') {
+        const independent = this.layout.independentVowelMap[this.pendingVowel];
+        if (independent) {
+          this.pendingVowel = null;
+          this.insertAtCursor(independent);
+          return true;
+        }
+      }
+      if (mapped.length === 1 && this.isConsonantChar(mapped)) {
+        const sign = this.pendingVowel;
+        this.pendingVowel = null;
+        this.insertAtCursor(mapped + sign);
+        return true;
+      }
+      this.flushPending();
+    }
+
+    if (key === 'x') {
+      return this.handleXKey(mapped, el);
     }
 
     this.insertAtCursor(mapped);
     return true;
+  }
+
+  flushPending() {
+    if (!this.pendingVowel) return;
+    const sign = this.pendingVowel;
+    this.pendingVowel = null;
+    this.insertAtCursor(sign);
   }
 
   handleGPending(key, el) {
